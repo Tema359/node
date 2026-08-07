@@ -47,7 +47,10 @@ function handle(req) {
       type: 'text/plain; charset=utf-8',
       body:
         Object.entries(req.headers)
-          .map(([key, value]) => `${key}: ${value}`)
+          .map(([key, value]) => {
+            const decodedValue = Buffer.from(value, 'latin1').toString('utf8');
+            return `${key}: ${decodedValue}`;
+          })
           .join('\n') + '\n',
     };
   }

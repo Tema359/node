@@ -5,6 +5,7 @@ const { execFileSync } = require('node:child_process');
 const { parseRequest, handle, serialize } = require('./utils');
 
 const PORT = 3443;
+const IDLE_MS = 5000;
 
 const certDir = path.join(__dirname, '..', '/src');
 const certPath = path.join(certDir, 'cert.pem');
@@ -35,6 +36,8 @@ function ensureCertificate() {
       certPath,
       '-days',
       '365',
+      '-subj',
+      '/CN=localhost',
     ],
     {
       stdio: 'inherit',
@@ -52,6 +55,11 @@ const tlsOptions = {
 tls
   .createServer(tlsOptions, (socket) => {
     let buf = '';
+
+    socket.setTimeout(IDLE_MS, () => {
+      socket.end();
+    });
+
     socket.on('data', (chunk) => {
       buf += chunk.toString('latin1');
       for (;;) {
@@ -60,9 +68,9 @@ tls
         buf = buf.slice(req.consumed);
         const out = handle(req);
         console.log(`  ${req.method} ${req.path} → ${out.status}`);
-        socket.write(serialize(handle(req)));
+        socket.write(serialize(out, { keepAlive: true }));
       }
     });
-    socket.on('error', (e) => console.log(`  сокет: ${e.code}`));
+    socket.on('error', (e) => console.log(`  socket: ${e.code}`));
   })
   .listen(PORT, () => console.log(`Server is running on port: ${PORT}`));

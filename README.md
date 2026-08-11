@@ -64,3 +64,46 @@ SSL-Session:
 ---
 verify return code 18 indicates that the security certificate that is signed by the same person or organization that made it, rather than by an independent third party called a Certificate Authority (CA)
 ```
+
+## Docker image size comparison
+
+Build and start the application:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Follow the application logs and stop the containers:
+
+```bash
+docker compose logs -f app
+docker compose down
+```
+
+```text
+REPOSITORY   TAG            SIZE
+hw-05        multi-stage    358MB
+hw-05        single-stage   381MB
+```
+
+The final multi-stage image is **23 MB smaller** because its `runner` stage contains only production dependencies and the compiled `dist` artifact, while development dependencies and source files remain in the `builder` stage.
+
+## Verifying PostgreSQL data persistence
+
+PostgreSQL stores its data in the named `pgdata` volume. The following commands
+were used to create a table, stop and remove the containers, start PostgreSQL
+again, and verify that the table still exists:
+
+```bash
+docker compose up -d --wait db
+docker compose exec -T db psql -U app -d app -c \
+  'CREATE TABLE IF NOT EXISTS persistence_check (id integer PRIMARY KEY);'
+docker compose down
+docker compose up -d --wait db
+docker compose exec -T db psql -U app -d app -c '\dt persistence_check'
+```
+
+The final command must list the `persistence_check` table. Do not add the `-v`
+option to `docker compose down`, because `down -v` removes the named volume and
+its PostgreSQL data.

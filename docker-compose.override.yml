@@ -1,0 +1,11 @@
+services:
+  app:
+    ports:
+      - '${PORT:-3000}:3000'
+    environment:
+      NODE_ENV: '${NODE_ENV:-development}'
+    volumes:
+      - ./src:/app/src
+      - /app/node_modules
+
+    command: ['node', '--watch', '--watch-preserve-output', 'src/express.js']

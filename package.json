@@ -1,0 +1,17 @@
+{
+  "name": "hw-05",
+  "version": "1.0.0",
+  "description": "docker",
+  "main": "dist/express.js",
+  "scripts": {
+    "build": "esbuild src/express.js --platform=node --format=esm --packages=external --outfile=dist/express.js",
+    "start": "node dist/express.js"
+  },
+  "dependencies": {
+    "express": "^5.2.1"
+  },
+  "type": "module",
+  "devDependencies": {
+    "esbuild": "^0.28.2"
+  }
+}

@@ -1,5 +1,19 @@
 ## Launch
 
+Build and start the application:
+
+```bash
+docker compose up -d
+docker compose ps
+```
+
+Follow the application logs and stop the containers:
+
+```bash
+docker compose logs -f app
+docker compose down
+```
+
 HTTP-server:
 
 ```bash
@@ -22,7 +36,9 @@ The server is available at `https://localhost:3443`. When you run it for the fir
 openssl req -x509 -newkey rsa:2048 -nodes \
   -keyout key.pem \
   -out cert.pem \
-  -days 365
+  -days 365 \
+  -subj \
+  CN=localhost
 ```
 
 ```
@@ -66,20 +82,6 @@ verify return code 18 indicates that the security certificate that is signed by 
 ```
 
 ## Docker image size comparison
-
-Build and start the application:
-
-```bash
-docker compose up -d
-docker compose ps
-```
-
-Follow the application logs and stop the containers:
-
-```bash
-docker compose logs -f app
-docker compose down
-```
 
 ```text
 REPOSITORY   TAG            SIZE

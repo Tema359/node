@@ -3,7 +3,7 @@ import { INJECT_TOKENS, INJECTABLE, SCOPE_METADATA } from './tokens.js';
 import { Constructor, InjectionToken, Provider, Scope } from './types.js';
 
 export class Container {
-  private readonly singletons = new Map<InjectionToken, unknown>();
+  private readonly singletons = new Map<Constructor, unknown>();
   private readonly providers = new Map<InjectionToken, Provider>();
 
   registerClass<T>(token: InjectionToken<T>, target: Constructor<T>): void {
@@ -23,10 +23,6 @@ export class Container {
       throw new Error(`Circular dependency detected: ${chain}`);
     }
 
-    if (this.singletons.has(token)) {
-      return this.singletons.get(token) as T;
-    }
-
     const provider = this.providers.get(token);
 
     if (provider && 'useValue' in provider) {
@@ -41,17 +37,26 @@ export class Container {
           : undefined;
 
     if (!target) {
-      throw new Error(
-        `Provider for token ${String(token)} is not registered`,
-      );
+      throw new Error(`Provider for token ${String(token)} is not registered`);
+    }
+
+    if (this.singletons.has(target)) {
+      return this.singletons.get(target) as T;
     }
 
     if (!Reflect.getMetadata(INJECTABLE, target)) {
       throw new Error(`${target.name} not mark as @Injectable()`);
     }
 
-    const paramTypes: Constructor[] =
-      Reflect.getMetadata('design:paramtypes', target) ?? [];
+    const paramTypes = (Reflect.getMetadata('design:paramtypes', target) ??
+      []) as Constructor[];
+
+    if (target.length > 0 && paramTypes.length === 0) {
+      throw new Error(
+        `Cannot resolve ${target.name}: constructor parameter metadata is missing. ` +
+          'Enable emitDecoratorMetadata in tsconfig.json.',
+      );
+    }
 
     const injectedTokens: Map<number, InjectionToken> =
       Reflect.getOwnMetadata(INJECT_TOKENS, target) ?? new Map();
@@ -70,7 +75,7 @@ export class Container {
       Reflect.getMetadata(SCOPE_METADATA, target) ?? 'singleton';
 
     if (scope === 'singleton') {
-      this.singletons.set(token, instance);
+      this.singletons.set(target, instance);
     }
 
     return instance as T;

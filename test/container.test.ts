@@ -19,9 +19,6 @@ describe('Container', () => {
       constructor(readonly dependency: B) {}
     }
 
-    Reflect.defineMetadata('design:paramtypes', [C], B);
-    Reflect.defineMetadata('design:paramtypes', [B], A);
-
     const result = new Container().resolve(A);
 
     expect(result).toBeInstanceOf(A);
@@ -38,6 +35,16 @@ describe('Container', () => {
     expect(container.resolve(SingletonService)).toBe(
       container.resolve(SingletonService),
     );
+  });
+
+  it('shares a singleton between a class token and its registered alias', () => {
+    @Injectable()
+    class Service {}
+
+    const container = new Container();
+    container.registerClass('SVC', Service);
+
+    expect(container.resolve('SVC')).toBe(container.resolve(Service));
   });
 
   it('returns a new instance for the transient scope', () => {
@@ -61,9 +68,6 @@ describe('Container', () => {
     class B {
       constructor(@Inject('A') readonly dependency: unknown) {}
     }
-
-    Reflect.defineMetadata('design:paramtypes', [Object], A);
-    Reflect.defineMetadata('design:paramtypes', [Object], B);
 
     const container = new Container();
     container.registerClass('A', A);
@@ -94,8 +98,6 @@ describe('Container', () => {
       ) {}
     }
 
-    Reflect.defineMetadata('design:paramtypes', [Object], Application);
-
     const container = new Container();
     container.registerValue(CONFIG, config);
 
@@ -118,6 +120,23 @@ describe('Container', () => {
     );
   });
 
+  it('rejects a constructor with missing parameter type metadata', () => {
+    @Injectable()
+    class Dependency {}
+
+    @Injectable()
+    class Application {
+      constructor(readonly dependency: Dependency) {}
+    }
+
+    Reflect.deleteMetadata('design:paramtypes', Application);
+
+    expect(() => new Container().resolve(Application)).toThrow(
+      'Cannot resolve Application: constructor parameter metadata is missing. ' +
+        'Enable emitDecoratorMetadata in tsconfig.json.',
+    );
+  });
+
   it('reuses a singleton dependency inside transient instances', () => {
     @Injectable()
     class Logger {}
@@ -126,8 +145,6 @@ describe('Container', () => {
     class Handler {
       constructor(readonly logger: Logger) {}
     }
-
-    Reflect.defineMetadata('design:paramtypes', [Logger], Handler);
 
     const container = new Container();
     const first = container.resolve(Handler);
@@ -145,8 +162,6 @@ describe('Container', () => {
     class Application {
       constructor(readonly context: RequestContext) {}
     }
-
-    Reflect.defineMetadata('design:paramtypes', [RequestContext], Application);
 
     const container = new Container();
     const first = container.resolve(Application);

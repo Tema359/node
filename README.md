@@ -1,5 +1,11 @@
 ## Launch
 
+Run tests
+
+```bash
+docker compose run --rm api npm test
+```
+
 Build and start the application:
 
 ```bash
@@ -29,6 +35,10 @@ node src/https-server.js
 ```
 
 The server is available at `https://localhost:3443`. When you run it for the first time, a self-signed certificate and a private key are automatically created in the `/src` directory;
+
+## How the IoC container works
+
+When a class has a decorator, TypeScript can emit its constructor parameter types as `design:paramtypes` metadata. The container reads this metadata with `Reflect.getMetadata('design:paramtypes', Target)` and recursively resolves each constructor dependency. This metadata is generated only when `emitDecoratorMetadata` (together with `experimentalDecorators`) is enabled in `tsconfig.json`; without it, the parameter types do not exist at runtime, so the container cannot discover the dependency graph automatically.
 
 ## Certificate generation command
 

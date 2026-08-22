@@ -1,17 +1,26 @@
 {
-  "name": "hw-05",
+  "name": "hw-06",
   "version": "1.0.0",
-  "description": "docker",
-  "main": "dist/express.js",
+  "description": "IoC container",
   "scripts": {
-    "build": "esbuild src/express.js --platform=node --format=esm --packages=external --outfile=dist/express.js",
-    "start": "node dist/express.js"
+    "build": "npm run build:ioc && npm run build:api",
+    "build:ioc": "tsc -p tsconfig.build.json",
+    "build:api": "esbuild src/express.js --platform=node --format=esm --packages=external --outfile=dist/api/express.js",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
   },
   "dependencies": {
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "reflect-metadata": "^0.2.2"
   },
   "type": "module",
   "devDependencies": {
-    "esbuild": "^0.28.2"
+    "@swc/core": "^1.16.0",
+    "@types/node": "^22.0.0",
+    "esbuild": "^0.25.12",
+    "typescript": "^6.0.3",
+    "unplugin-swc": "1.5.9",
+    "vitest": "^3.0.0"
   }
 }

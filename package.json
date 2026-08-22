@@ -3,15 +3,13 @@
   "version": "1.0.0",
   "description": "IoC container",
   "scripts": {
-    "build": "npm run build:ioc && npm run build:api",
+    "build": "npm run build:ioc",
     "build:ioc": "tsc -p tsconfig.build.json",
-    "build:api": "esbuild src/express.js --platform=node --format=esm --packages=external --outfile=dist/api/express.js",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest"
   },
   "dependencies": {
-    "express": "^5.2.1",
     "reflect-metadata": "^0.2.2"
   },
   "type": "module",

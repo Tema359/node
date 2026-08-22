@@ -10,4 +10,4 @@ services:
       - .:/app
       - /app/node_modules
 
-    command: ['node', '--watch', '--watch-preserve-output', 'src/express.js']
+    command: ['sh', '-c', 'npm run build:ioc && node dist/ioc/api.js']

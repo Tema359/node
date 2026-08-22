@@ -8,6 +8,22 @@ export interface InjectableOptions {
   scope?: Scope;
 }
 
+export type RequestMethod = 'GET' | 'POST';
+
+export interface RouteDefinition {
+  method: RequestMethod;
+  path: string;
+  handlerName: string | symbol;
+}
+
+export type RouteParamSource = 'body' | 'param' | 'query';
+
+export interface RouteParamDefinition {
+  index: number;
+  source: RouteParamSource;
+  name?: string;
+}
+
 export type Provider<T = unknown> =
   | {
       useClass: Constructor<T>;

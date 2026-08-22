@@ -40,6 +40,10 @@ The server is available at `https://localhost:3443`. When you run it for the fir
 
 When a class has a decorator, TypeScript can emit its constructor parameter types as `design:paramtypes` metadata. The container reads this metadata with `Reflect.getMetadata('design:paramtypes', Target)` and recursively resolves each constructor dependency. This metadata is generated only when `emitDecoratorMetadata` (together with `experimentalDecorators`) is enabled in `tsconfig.json`; without it, the parameter types do not exist at runtime, so the container cannot discover the dependency graph automatically.
 
+## How a parameter decorator knows where to inject a value
+
+TypeScript passes a `parameterIndex` to every parameter decorator. This index identifies the argument's position in the method signature. For example, in `find(@Param('id') id, @Query('view') view)`, the decorators receive the indexes `0` and `1`. `@Param`, `@Query`, and `@Body` do not read the HTTP request themselves. Instead, they store the argument index, value source, and optional name in the method's metadata. When handling a request, the dispatcher reads this metadata, creates an `args` array, assigns each extracted value to `args[parameterIndex]`, and invokes the controller method with `handler.apply(controller, args)`. This is how each value reaches the parameter carrying the corresponding decorator.
+
 ## Certificate generation command
 
 ```bash

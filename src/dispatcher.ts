@@ -11,11 +11,33 @@ import { Constructor, RouteParamDefinition } from './types.js';
 
 type ControllerInstance = Record<PropertyKey, unknown>;
 
+export const MAX_JSON_BODY_SIZE = 100 * 1024;
+
+class PayloadTooLargeError extends Error {
+  constructor() {
+    super('Request body is too large');
+    this.name = 'PayloadTooLargeError';
+  }
+}
+
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
+  const contentLength = Number(request.headers?.['content-length']);
+  if (Number.isFinite(contentLength) && contentLength > MAX_JSON_BODY_SIZE) {
+    throw new PayloadTooLargeError();
+  }
+
   const chunks: Buffer[] = [];
+  let receivedBytes = 0;
 
   for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+    receivedBytes += buffer.length;
+
+    if (receivedBytes > MAX_JSON_BODY_SIZE) {
+      throw new PayloadTooLargeError();
+    }
+
+    chunks.push(buffer);
   }
 
   if (chunks.length === 0) {
@@ -129,6 +151,11 @@ export class Dispatcher {
       const result = await handler.apply(controller, args);
       sendJson(response, 200, result);
     } catch (error) {
+      if (error instanceof PayloadTooLargeError) {
+        sendJson(response, 413, { error: 'Payload Too Large' });
+        return;
+      }
+
       if (error instanceof DtoValidationError) {
         sendJson(response, 400, {
           error: 'Validation failed',
@@ -142,6 +169,7 @@ export class Dispatcher {
         return;
       }
 
+      console.error('Unhandled request error:', error);
       sendJson(response, 500, { error: 'Internal Server Error' });
     }
   };

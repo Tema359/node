@@ -35,6 +35,26 @@ function compilePath(
   };
 }
 
+function compareRouteSpecificity(
+  left: RegisteredRoute,
+  right: RegisteredRoute,
+): number {
+  const leftSegments = left.path.split('/').filter(Boolean);
+  const rightSegments = right.path.split('/').filter(Boolean);
+  const sharedLength = Math.min(leftSegments.length, rightSegments.length);
+
+  for (let index = 0; index < sharedLength; index += 1) {
+    const leftIsParameter = leftSegments[index].startsWith(':');
+    const rightIsParameter = rightSegments[index].startsWith(':');
+
+    if (leftIsParameter !== rightIsParameter) {
+      return leftIsParameter ? 1 : -1;
+    }
+  }
+
+  return leftSegments.length - rightSegments.length;
+}
+
 export class Router {
   private readonly routes: RegisteredRoute[] = [];
 
@@ -50,6 +70,8 @@ export class Router {
         ...compilePath(route.path),
       });
     }
+
+    this.routes.sort(compareRouteSpecificity);
 
     return this;
   }

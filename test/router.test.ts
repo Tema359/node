@@ -52,4 +52,21 @@ describe('Router', () => {
     expect(match?.route.handlerName).toBe('findOne');
     expect(match?.params).toEqual({ id: 'a b' });
   });
+
+  it('prefers a static route over a parameter route declared first', () => {
+    @Controller('/shadow')
+    class ShadowController {
+      @Get('/:id')
+      byId() {}
+
+      @Get('/me')
+      me() {}
+    }
+
+    const router = new Router([ShadowController]);
+    const match = router.find('GET', '/shadow/me');
+
+    expect(match?.route.handlerName).toBe('me');
+    expect(match?.params).toEqual({});
+  });
 });

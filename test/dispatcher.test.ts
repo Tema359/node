@@ -1,13 +1,13 @@
 import 'reflect-metadata';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { Container } from '../src/container.js';
 import { Controller } from '../src/decorators/controller.js';
 import { Injectable } from '../src/decorators/injectable.js';
 import { Get, Post } from '../src/decorators/methods.js';
 import { Body, Param, Query } from '../src/decorators/params.js';
-import { Dispatcher } from '../src/dispatcher.js';
+import { Dispatcher, MAX_JSON_BODY_SIZE } from '../src/dispatcher.js';
 
 interface TestResponse {
   status: number;
@@ -127,6 +127,57 @@ describe('Dispatcher', () => {
     expect(await call(dispatcher, '/missing')).toEqual({
       status: 404,
       body: { error: 'Not Found' },
+    });
+  });
+
+  it('logs an unhandled controller error before returning 500', async () => {
+    const handlerError = new Error('database unavailable');
+
+    @Controller('/failure')
+    class FailingController {
+      @Get()
+      fail() {
+        throw handlerError;
+      }
+    }
+
+    const errorLog = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    try {
+      expect(
+        await call(new Dispatcher([FailingController]), '/failure'),
+      ).toEqual({
+        status: 500,
+        body: { error: 'Internal Server Error' },
+      });
+      expect(errorLog).toHaveBeenCalledWith(
+        'Unhandled request error:',
+        handlerError,
+      );
+    } finally {
+      errorLog.mockRestore();
+    }
+  });
+
+  it('returns 413 when the JSON body exceeds the size limit', async () => {
+    @Controller('/upload')
+    class UploadController {
+      @Post()
+      upload(@Body() body: unknown) {
+        return body;
+      }
+    }
+
+    const response = await call(
+      new Dispatcher([UploadController]),
+      '/upload',
+      'POST',
+      { data: 'x'.repeat(MAX_JSON_BODY_SIZE) },
+    );
+
+    expect(response).toEqual({
+      status: 413,
+      body: { error: 'Payload Too Large' },
     });
   });
 });

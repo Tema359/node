@@ -8,8 +8,10 @@ import { Controller } from '../src/decorators/controller.js';
 import { Injectable } from '../src/decorators/injectable.js';
 import { Get, Post } from '../src/decorators/methods.js';
 import { Body, Param, Query } from '../src/decorators/params.js';
+import { UseBodySchema } from '../src/decorators/schema.js';
 import { Dispatcher, MAX_JSON_BODY_SIZE } from '../src/dispatcher.js';
 import { CreateUserDto } from '../src/dto/create-user.dto.js';
+import { Interceptor } from '../src/interceptors/logging.interceptor.js';
 
 interface TestResponse {
   status: number;
@@ -215,6 +217,7 @@ describe('Dispatcher', () => {
     @Controller('/protected')
     class ProtectedController {
       @Post()
+      @UseBodySchema(CreateUserDto.schema)
       create(@Body() _body: CreateUserDto) {
         handlerCalled = true;
         return { ok: true };
@@ -293,6 +296,7 @@ describe('Dispatcher', () => {
     @Controller('/order')
     class OrderController {
       @Post()
+      @UseBodySchema(CreateUserDto.schema)
       create(@Body() _dto: CreateUserDto) {
         return { ok: true };
       }
@@ -318,5 +322,87 @@ describe('Dispatcher', () => {
       'handler',
       'interceptor:after',
     ]);
+  });
+
+  it('includes reading the request body in interceptor duration', async () => {
+    @Controller('/timed-body')
+    class TimedBodyController {
+      @Post()
+      create(@Body() body: unknown) {
+        return body;
+      }
+    }
+
+    const request = new Readable({ read() {} });
+    Object.assign(request, {
+      method: 'POST',
+      url: '/timed-body',
+      headers: { authorization: 'Bearer test-token' },
+    });
+    setTimeout(() => {
+      request.push('{"ok":true}');
+      request.push(null);
+    }, 25);
+
+    let payload = '';
+    const response = {
+      statusCode: 200,
+      setHeader() {},
+      end(chunk?: string) {
+        payload = chunk ?? '';
+      },
+    };
+    const messages: string[] = [];
+    const log = vi.spyOn(console, 'log').mockImplementation((message) => {
+      messages.push(String(message));
+    });
+
+    try {
+      await new Dispatcher([TimedBodyController]).handle(
+        request as IncomingMessage,
+        response as unknown as ServerResponse,
+      );
+
+      expect(JSON.parse(payload)).toEqual({ ok: true });
+      const duration = Number(
+        messages[0].match(/— ([0-9.]+) ms$/)?.[1] ?? 0,
+      );
+      expect(duration).toBeGreaterThanOrEqual(15);
+    } finally {
+      log.mockRestore();
+    }
+  });
+
+  it('composes additional interceptors without changing dispatch', async () => {
+    const events: string[] = [];
+    const secondInterceptor: Interceptor = {
+      async intercept(_request, next) {
+        events.push('second:before');
+        try {
+          return await next();
+        } finally {
+          events.push('second:after');
+        }
+      },
+    };
+
+    @Controller('/interceptor-chain')
+    class ChainController {
+      @Get()
+      run() {
+        events.push('handler');
+        return { ok: true };
+      }
+    }
+
+    const dispatcher = new Dispatcher([ChainController]).registerInterceptor(
+      secondInterceptor,
+    );
+
+    expect(await call(dispatcher, '/interceptor-chain')).toEqual({
+      status: 200,
+      body: { ok: true },
+    });
+    expect(events).toEqual(['second:before', 'handler', 'second:after']);
   });
 });

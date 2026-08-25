@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 import {
+  BODY_SCHEMA_METADATA,
   CONTROLLER_PREFIX_METADATA,
   INJECTABLE,
   REQUEST_METHOD_METADATA,
@@ -40,8 +41,16 @@ export function Controller(prefix: string): ClassDecorator {
 
       const path = (Reflect.getMetadata(ROUTE_PATH_METADATA, handler) ??
         '') as string;
+      const bodySchema = Reflect.getMetadata(BODY_SCHEMA_METADATA, handler);
 
-      return [{ method, path: joinPaths(prefix, path), handlerName }];
+      return [
+        {
+          method,
+          path: joinPaths(prefix, path),
+          handlerName,
+          ...(bodySchema ? { bodySchema } : {}),
+        },
+      ];
     });
 
     Reflect.defineMetadata(ROUTES_METADATA, routes, target);

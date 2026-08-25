@@ -6,10 +6,14 @@ import { requestContext } from './context/request-context.js';
 import { AuthGuard } from './guards/auth.guard.js';
 import {
   ExceptionFilter,
+  ForbiddenError,
   NotFoundError,
   PayloadTooLargeError,
 } from './filters/exception.filter.js';
-import { LoggingInterceptor } from './interceptors/logging.interceptor.js';
+import {
+  Interceptor,
+  LoggingInterceptor,
+} from './interceptors/logging.interceptor.js';
 import { ValidationError, ZodValidationPipe } from './pipes/zod-validation.pipe.js';
 import { Router } from './router.js';
 import { ROUTE_PARAMS_METADATA } from './tokens.js';
@@ -86,7 +90,7 @@ export class Dispatcher {
   private readonly container: Container;
   private readonly validationPipe = new ZodValidationPipe();
   private readonly authGuard = new AuthGuard();
-  private readonly loggingInterceptor = new LoggingInterceptor();
+  private readonly interceptors: Interceptor[] = [new LoggingInterceptor()];
   private readonly exceptionFilter = new ExceptionFilter();
   private readonly observeLifecycle: LifecycleObserver;
 
@@ -135,6 +139,11 @@ export class Dispatcher {
     return this;
   }
 
+  registerInterceptor(interceptor: Interceptor): this {
+    this.interceptors.push(interceptor);
+    return this;
+  }
+
   readonly handle = async (
     request: IncomingMessage,
     response: ServerResponse,
@@ -164,12 +173,10 @@ export class Dispatcher {
 
       this.observeLifecycle('guard');
       if (!this.authGuard.canActivate(request)) {
-        sendJson(response, 403, { error: 'Forbidden' });
-        return;
+        throw new ForbiddenError();
       }
 
       const { route, params: pathParams } = routeMatch;
-      const body = await readJsonBody(request);
       const definitions: RouteParamDefinition[] =
         Reflect.getOwnMetadata(
           ROUTE_PARAMS_METADATA,
@@ -190,19 +197,18 @@ export class Dispatcher {
         throw new Error(`Controller handler ${String(route.handlerName)} is missing`);
       }
 
-      const result = await this.loggingInterceptor.intercept(
-        request,
-        () => {
+      const invokeHandler = async (): Promise<unknown> => {
+          const body = await readJsonBody(request);
           const args: unknown[] = [];
 
           for (const definition of definitions) {
             if (definition.source === 'body') {
-              const metatype = parameterTypes[definition.index];
-              if (this.shouldValidate(metatype)) {
+              if (route.bodySchema) {
                 this.observeLifecycle('pipe');
                 args[definition.index] = this.validationPipe.transform(
                   body,
-                  metatype,
+                  route.bodySchema,
+                  parameterTypes[definition.index],
                 );
               } else {
                 args[definition.index] = body;
@@ -218,19 +224,26 @@ export class Dispatcher {
 
           this.observeLifecycle('handler');
           return handler.apply(controller, args);
-        },
-        () => this.observeLifecycle('interceptor:before'),
-        () => this.observeLifecycle('interceptor:after'),
+      };
+      const interceptorChain = this.interceptors.reduceRight<
+        () => Promise<unknown>
+      >(
+        (next, interceptor) => () => interceptor.intercept(request, next),
+        invokeHandler,
       );
+      this.observeLifecycle('interceptor:before');
+
+      let result: unknown;
+      try {
+        result = await interceptorChain();
+      } finally {
+        this.observeLifecycle('interceptor:after');
+      }
+
       sendJson(response, 200, result);
     } catch (error) {
       this.exceptionFilter.catch(error, response);
     }
-  }
-
-  private shouldValidate(metatype: Constructor | undefined): metatype is Constructor {
-    const builtInTypes: Function[] = [Object, String, Number, Boolean, Array];
-    return Boolean(metatype && !builtInTypes.includes(metatype));
   }
 
 }

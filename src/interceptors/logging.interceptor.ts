@@ -1,6 +1,13 @@
 import { IncomingMessage } from 'node:http';
 
-export class LoggingInterceptor {
+export interface Interceptor {
+  intercept<T>(
+    request: IncomingMessage,
+    next: () => T | Promise<T>,
+  ): Promise<T>;
+}
+
+export class LoggingInterceptor implements Interceptor {
   constructor(private readonly now: () => number = () => performance.now()) {}
 
   async intercept<T>(

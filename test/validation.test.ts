@@ -6,6 +6,7 @@ import { Container } from '../src/container.js';
 import { Controller } from '../src/decorators/controller.js';
 import { Post } from '../src/decorators/methods.js';
 import { Body } from '../src/decorators/params.js';
+import { UseBodySchema } from '../src/decorators/schema.js';
 import { Dispatcher } from '../src/dispatcher.js';
 import { CreateUserDto } from '../src/dto/create-user.dto.js';
 import {
@@ -17,6 +18,7 @@ describe('ZodValidationPipe', () => {
   it('returns a DTO instance for valid input', () => {
     const result = new ZodValidationPipe().transform(
       { name: 'Ada', email: 'ada@example.com' },
+      CreateUserDto.schema,
       CreateUserDto,
     );
 
@@ -28,6 +30,7 @@ describe('ZodValidationPipe', () => {
     expect(() =>
       new ZodValidationPipe().transform(
         { name: '', email: 'wrong' },
+        CreateUserDto.schema,
         CreateUserDto,
       ),
     ).toThrow(ValidationError);
@@ -35,6 +38,7 @@ describe('ZodValidationPipe', () => {
     try {
       new ZodValidationPipe().transform(
         { name: '', email: 'wrong' },
+        CreateUserDto.schema,
         CreateUserDto,
       );
     } catch (error) {
@@ -49,6 +53,7 @@ describe('ZodValidationPipe', () => {
     @Controller('/users')
     class UsersController {
       @Post()
+      @UseBodySchema(CreateUserDto.schema)
       create(@Body() dto: CreateUserDto) {
         return { isDto: dto instanceof CreateUserDto, name: dto.name };
       }
@@ -98,5 +103,44 @@ describe('ZodValidationPipe', () => {
     const missingName = await call({ email: 'not-an-email' });
     expect(missingName.status).toBe(400);
     expect(JSON.stringify(missingName.body)).toMatch(/email/);
+  });
+
+  it('validates @Body() from route metadata when its TypeScript type is unknown', async () => {
+    @Controller('/unknown-body')
+    class UnknownBodyController {
+      @Post()
+      @UseBodySchema(CreateUserDto.schema)
+      create(@Body() body: unknown) {
+        return body;
+      }
+    }
+
+    const dispatcher = new Dispatcher([UnknownBodyController]);
+    const request = Readable.from([
+      JSON.stringify({ name: 'Ada', email: 'not-an-email' }),
+    ]);
+    Object.assign(request, {
+      method: 'POST',
+      url: '/unknown-body',
+      headers: { authorization: 'Bearer test-token' },
+    });
+    let payload = '';
+    const response = {
+      statusCode: 200,
+      setHeader() {},
+      end(chunk?: string) {
+        payload = chunk ?? '';
+      },
+    };
+
+    await dispatcher.handle(
+      request as IncomingMessage,
+      response as unknown as ServerResponse,
+    );
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.parse(payload).fields).toEqual([
+      { field: 'email', reasons: ['must be a valid email'] },
+    ]);
   });
 });

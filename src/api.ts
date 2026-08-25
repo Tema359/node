@@ -4,6 +4,7 @@ import { Controller } from './decorators/controller.js';
 import { Injectable } from './decorators/injectable.js';
 import { Get, Post } from './decorators/methods.js';
 import { Body, Param, Query } from './decorators/params.js';
+import { UseBodySchema } from './decorators/schema.js';
 import { Dispatcher } from './dispatcher.js';
 import { CreateUserDto } from './dto/create-user.dto.js';
 
@@ -37,6 +38,7 @@ class UsersController {
   }
 
   @Post()
+  @UseBodySchema(CreateUserDto.schema)
   create(@Body() dto: CreateUserDto) {
     return this.users.create(dto);
   }

@@ -6,3 +6,4 @@ export const ROUTE_PATH_METADATA = Symbol('route_path');
 export const REQUEST_METHOD_METADATA = Symbol('request_method');
 export const ROUTES_METADATA = Symbol('routes');
 export const ROUTE_PARAMS_METADATA = Symbol('route_params');
+export const BODY_SCHEMA_METADATA = Symbol('body_schema');

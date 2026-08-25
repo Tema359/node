@@ -8,6 +8,13 @@ export class NotFoundError extends Error {
   }
 }
 
+export class ForbiddenError extends Error {
+  constructor(message = 'Forbidden') {
+    super(message);
+    this.name = 'ForbiddenError';
+  }
+}
+
 export class PayloadTooLargeError extends Error {
   constructor() {
     super('Request body is too large');
@@ -27,6 +34,11 @@ function sendJson(
 
 export class ExceptionFilter {
   catch(error: unknown, response: ServerResponse): void {
+    if (error instanceof ForbiddenError) {
+      sendJson(response, 403, { error: error.message });
+      return;
+    }
+
     if (error instanceof NotFoundError) {
       sendJson(response, 404, { error: error.message });
       return;

@@ -1,10 +1,6 @@
 import { z } from 'zod';
 import { Constructor } from '../types.js';
 
-interface ZodDtoConstructor<T> extends Constructor<T> {
-  schema: z.ZodType;
-}
-
 export interface ValidationIssue {
   field: string;
   reasons: string[];
@@ -17,19 +13,13 @@ export class ValidationError extends Error {
   }
 }
 
-function hasZodSchema<T>(
-  metatype: Constructor<T>,
-): metatype is ZodDtoConstructor<T> {
-  return 'schema' in metatype && metatype.schema instanceof z.ZodType;
-}
-
 export class ZodValidationPipe {
-  transform<T>(value: unknown, metatype: Constructor<T>): T {
-    if (!hasZodSchema(metatype)) {
-      return value as T;
-    }
-
-    const result = metatype.schema.safeParse(value);
+  transform<T>(
+    value: unknown,
+    schema: z.ZodType,
+    metatype?: Constructor<T>,
+  ): T {
+    const result = schema.safeParse(value);
 
     if (!result.success) {
       const reasonsByField = new Map<string, string[]>();
@@ -46,8 +36,13 @@ export class ZodValidationPipe {
       );
     }
 
-    const instance = new metatype();
-    Object.assign(instance as object, result.data);
-    return instance;
+    const builtInTypes: Function[] = [Object, String, Number, Boolean, Array];
+    if (metatype && !builtInTypes.includes(metatype as Function)) {
+      const instance = new metatype();
+      Object.assign(instance as object, result.data);
+      return instance;
+    }
+
+    return result.data as T;
   }
 }

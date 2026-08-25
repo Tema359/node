@@ -1,3 +1,5 @@
+import type { z } from 'zod';
+
 export type Constructor<T = unknown> = new (...args: any[]) => T;
 
 export type InjectionToken<T = unknown> = Constructor<T> | string | symbol;
@@ -14,6 +16,7 @@ export interface RouteDefinition {
   method: RequestMethod;
   path: string;
   handlerName: string | symbol;
+  bodySchema?: z.ZodType;
 }
 
 export type RouteParamSource = 'body' | 'param' | 'query';

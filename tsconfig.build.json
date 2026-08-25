@@ -3,7 +3,8 @@
   "compilerOptions": {
     "noEmit": false,
     "rootDir": "src",
-    "outDir": "dist/ioc"
+    "outDir": "dist/ioc",
+    "types": ["node"]
   },
   "include": ["src/**/*.ts"],
   "exclude": ["test", "dist", "node_modules"]

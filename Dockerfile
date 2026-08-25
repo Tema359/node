@@ -27,4 +27,4 @@ EXPOSE $PORT
 HEALTHCHECK --interval=5s --timeout=3s --start-period=5s --retries=3 \
   CMD node -e "fetch(`http://127.0.0.1:${PORT}/health`).then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["node", "dist/api/express.js"]
+CMD ["node", "dist/ioc/api.js"]

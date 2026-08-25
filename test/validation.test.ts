@@ -9,13 +9,13 @@ import { Body } from '../src/decorators/params.js';
 import { Dispatcher } from '../src/dispatcher.js';
 import { CreateUserDto } from '../src/dto/create-user.dto.js';
 import {
-  DtoValidationError,
-  ValidationPipe,
-} from '../src/pipes/validation.pipe.js';
+  ValidationError,
+  ZodValidationPipe,
+} from '../src/pipes/zod-validation.pipe.js';
 
-describe('ValidationPipe', () => {
+describe('ZodValidationPipe', () => {
   it('returns a DTO instance for valid input', () => {
-    const result = new ValidationPipe().transform(
+    const result = new ZodValidationPipe().transform(
       { name: 'Ada', email: 'ada@example.com' },
       CreateUserDto,
     );
@@ -26,16 +26,19 @@ describe('ValidationPipe', () => {
 
   it('reports fields and reasons for invalid input', () => {
     expect(() =>
-      new ValidationPipe().transform(
+      new ZodValidationPipe().transform(
         { name: '', email: 'wrong' },
         CreateUserDto,
       ),
-    ).toThrow(DtoValidationError);
+    ).toThrow(ValidationError);
 
     try {
-      new ValidationPipe().transform({ name: '', email: 'wrong' }, CreateUserDto);
+      new ZodValidationPipe().transform(
+        { name: '', email: 'wrong' },
+        CreateUserDto,
+      );
     } catch (error) {
-      expect((error as DtoValidationError).issues).toEqual([
+      expect((error as ValidationError).issues).toEqual([
         { field: 'name', reasons: ['must be at least 2 characters long'] },
         { field: 'email', reasons: ['must be a valid email'] },
       ]);
@@ -55,7 +58,11 @@ describe('ValidationPipe', () => {
 
     async function call(body: unknown) {
       const request = Readable.from([JSON.stringify(body)]);
-      Object.assign(request, { method: 'POST', url: '/users' });
+      Object.assign(request, {
+        method: 'POST',
+        url: '/users',
+        headers: { authorization: 'Bearer test-token' },
+      });
       let payload = '';
       const response = {
         statusCode: 200,

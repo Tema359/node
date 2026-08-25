@@ -1,24 +1,31 @@
 import 'reflect-metadata';
+import { randomUUID } from 'node:crypto';
 import { IncomingMessage, ServerResponse } from 'node:http';
 import { Container, container as defaultContainer } from './container.js';
+import { requestContext } from './context/request-context.js';
+import { AuthGuard } from './guards/auth.guard.js';
 import {
-  DtoValidationError,
-  ValidationPipe,
-} from './pipes/validation.pipe.js';
+  ExceptionFilter,
+  NotFoundError,
+  PayloadTooLargeError,
+} from './filters/exception.filter.js';
+import { LoggingInterceptor } from './interceptors/logging.interceptor.js';
+import { ValidationError, ZodValidationPipe } from './pipes/zod-validation.pipe.js';
 import { Router } from './router.js';
 import { ROUTE_PARAMS_METADATA } from './tokens.js';
 import { Constructor, RouteParamDefinition } from './types.js';
 
 type ControllerInstance = Record<PropertyKey, unknown>;
+export type LifecycleStage =
+  | 'middleware'
+  | 'guard'
+  | 'interceptor:before'
+  | 'pipe'
+  | 'handler'
+  | 'interceptor:after';
+export type LifecycleObserver = (stage: LifecycleStage) => void;
 
 export const MAX_JSON_BODY_SIZE = 100 * 1024;
-
-class PayloadTooLargeError extends Error {
-  constructor() {
-    super('Request body is too large');
-    this.name = 'PayloadTooLargeError';
-  }
-}
 
 async function readJsonBody(request: IncomingMessage): Promise<unknown> {
   const contentLength = Number(request.headers?.['content-length']);
@@ -44,7 +51,17 @@ async function readJsonBody(request: IncomingMessage): Promise<unknown> {
     return undefined;
   }
 
-  return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString('utf8'));
+  } catch (error) {
+    if (error instanceof SyntaxError) {
+      throw new ValidationError([
+        { field: 'body', reasons: ['Invalid JSON body'] },
+      ]);
+    }
+
+    throw error;
+  }
 }
 
 function sendJson(
@@ -57,17 +74,39 @@ function sendJson(
   response.end(JSON.stringify(value));
 }
 
+function getRequestId(request: IncomingMessage): string {
+  const header = request.headers?.['x-request-id'];
+  const value = Array.isArray(header) ? header[0] : header;
+
+  return value?.trim() || randomUUID();
+}
+
 export class Dispatcher {
   private readonly router = new Router();
   private readonly container: Container;
-  private readonly validationPipe = new ValidationPipe();
+  private readonly validationPipe = new ZodValidationPipe();
+  private readonly authGuard = new AuthGuard();
+  private readonly loggingInterceptor = new LoggingInterceptor();
+  private readonly exceptionFilter = new ExceptionFilter();
+  private readonly observeLifecycle: LifecycleObserver;
 
-  constructor(controllers?: Constructor[], container?: Container);
-  constructor(container?: Container, controllers?: Constructor[]);
+  constructor(
+    controllers?: Constructor[],
+    container?: Container,
+    observeLifecycle?: LifecycleObserver,
+  );
+  constructor(
+    container?: Container,
+    controllers?: Constructor[],
+    observeLifecycle?: LifecycleObserver,
+  );
   constructor(
     controllersOrContainer: Constructor[] | Container = [],
     containerOrControllers: Container | Constructor[] = defaultContainer,
+    observeLifecycle: LifecycleObserver = () => {},
   ) {
+    this.observeLifecycle = observeLifecycle;
+
     if (controllersOrContainer instanceof Container) {
       this.container = controllersOrContainer;
       this.registerControllers(
@@ -100,12 +139,32 @@ export class Dispatcher {
     request: IncomingMessage,
     response: ServerResponse,
   ): Promise<void> => {
+    this.observeLifecycle('middleware');
+    const requestId = getRequestId(request);
+    response.setHeader('x-request-id', requestId);
+
+    await requestContext.run(requestId, () =>
+      this.dispatch(request, response),
+    );
+  };
+
+  private async dispatch(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): Promise<void> {
     try {
       const url = new URL(request.url ?? '/', 'http://localhost');
       const routeMatch = this.router.find(request.method, url.pathname);
 
       if (!routeMatch) {
-        sendJson(response, 404, { error: 'Not Found' });
+        throw new NotFoundError(
+          `Route ${request.method ?? 'UNKNOWN'} ${url.pathname} not found`,
+        );
+      }
+
+      this.observeLifecycle('guard');
+      if (!this.authGuard.canActivate(request)) {
+        sendJson(response, 403, { error: 'Forbidden' });
         return;
       }
 
@@ -122,23 +181,6 @@ export class Dispatcher {
         route.controller.prototype,
         route.handlerName,
       ) ?? []) as Constructor[];
-      const args: unknown[] = [];
-
-      for (const definition of definitions) {
-        if (definition.source === 'body') {
-          const metatype = parameterTypes[definition.index];
-          args[definition.index] = this.shouldValidate(metatype)
-            ? this.validationPipe.transform(body, metatype)
-            : body;
-        } else if (definition.source === 'param') {
-          args[definition.index] = pathParams[definition.name ?? ''];
-        } else {
-          args[definition.index] = url.searchParams.get(
-            definition.name ?? '',
-          ) ?? undefined;
-        }
-      }
-
       const controller = this.container.resolve(
         route.controller,
       ) as ControllerInstance;
@@ -148,31 +190,43 @@ export class Dispatcher {
         throw new Error(`Controller handler ${String(route.handlerName)} is missing`);
       }
 
-      const result = await handler.apply(controller, args);
+      const result = await this.loggingInterceptor.intercept(
+        request,
+        () => {
+          const args: unknown[] = [];
+
+          for (const definition of definitions) {
+            if (definition.source === 'body') {
+              const metatype = parameterTypes[definition.index];
+              if (this.shouldValidate(metatype)) {
+                this.observeLifecycle('pipe');
+                args[definition.index] = this.validationPipe.transform(
+                  body,
+                  metatype,
+                );
+              } else {
+                args[definition.index] = body;
+              }
+            } else if (definition.source === 'param') {
+              args[definition.index] = pathParams[definition.name ?? ''];
+            } else {
+              args[definition.index] = url.searchParams.get(
+                definition.name ?? '',
+              ) ?? undefined;
+            }
+          }
+
+          this.observeLifecycle('handler');
+          return handler.apply(controller, args);
+        },
+        () => this.observeLifecycle('interceptor:before'),
+        () => this.observeLifecycle('interceptor:after'),
+      );
       sendJson(response, 200, result);
     } catch (error) {
-      if (error instanceof PayloadTooLargeError) {
-        sendJson(response, 413, { error: 'Payload Too Large' });
-        return;
-      }
-
-      if (error instanceof DtoValidationError) {
-        sendJson(response, 400, {
-          error: 'Validation failed',
-          fields: error.issues,
-        });
-        return;
-      }
-
-      if (error instanceof SyntaxError) {
-        sendJson(response, 400, { error: 'Invalid JSON body' });
-        return;
-      }
-
-      console.error('Unhandled request error:', error);
-      sendJson(response, 500, { error: 'Internal Server Error' });
+      this.exceptionFilter.catch(error, response);
     }
-  };
+  }
 
   private shouldValidate(metatype: Constructor | undefined): metatype is Constructor {
     const builtInTypes: Function[] = [Object, String, Number, Boolean, Array];

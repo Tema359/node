@@ -3,11 +3,13 @@ import { IncomingMessage, ServerResponse } from 'node:http';
 import { Readable } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import { Container } from '../src/container.js';
+import { requestContext } from '../src/context/request-context.js';
 import { Controller } from '../src/decorators/controller.js';
 import { Injectable } from '../src/decorators/injectable.js';
 import { Get, Post } from '../src/decorators/methods.js';
 import { Body, Param, Query } from '../src/decorators/params.js';
 import { Dispatcher, MAX_JSON_BODY_SIZE } from '../src/dispatcher.js';
+import { CreateUserDto } from '../src/dto/create-user.dto.js';
 
 interface TestResponse {
   status: number;
@@ -20,10 +22,15 @@ describe('Dispatcher', () => {
     path: string,
     method = 'GET',
     body?: unknown,
+    authorized = true,
   ): Promise<TestResponse> {
     const payload = body === undefined ? undefined : JSON.stringify(body);
     const incoming = Readable.from(payload === undefined ? [] : [payload]);
-    Object.assign(incoming, { method, url: path });
+    Object.assign(incoming, {
+      method,
+      url: path,
+      headers: authorized ? { authorization: 'Bearer test-token' } : {},
+    });
 
     let responseBody = '';
     const outgoing = {
@@ -126,12 +133,12 @@ describe('Dispatcher', () => {
     });
     expect(await call(dispatcher, '/missing')).toEqual({
       status: 404,
-      body: { error: 'Not Found' },
+      body: { error: 'Route GET /missing not found' },
     });
   });
 
   it('logs an unhandled controller error before returning 500', async () => {
-    const handlerError = new Error('database unavailable');
+    const handlerError = new Error('boom');
 
     @Controller('/failure')
     class FailingController {
@@ -154,9 +161,30 @@ describe('Dispatcher', () => {
         'Unhandled request error:',
         handlerError,
       );
+      const response = await call(new Dispatcher([FailingController]), '/failure');
+      expect(JSON.stringify(response.body)).not.toMatch(/boom|at .*\.ts:/);
     } finally {
       errorLog.mockRestore();
     }
+  });
+
+  it('maps a domain NotFoundError to a meaningful 404 response', async () => {
+    const { NotFoundError } = await import(
+      '../src/filters/exception.filter.js'
+    );
+
+    @Controller('/records')
+    class RecordsController {
+      @Get('/:id')
+      findOne(@Param('id') id: string) {
+        throw new NotFoundError(`Record ${id} does not exist`);
+      }
+    }
+
+    expect(await call(new Dispatcher([RecordsController]), '/records/42')).toEqual({
+      status: 404,
+      body: { error: 'Record 42 does not exist' },
+    });
   });
 
   it('returns 413 when the JSON body exceeds the size limit', async () => {
@@ -179,5 +207,116 @@ describe('Dispatcher', () => {
       status: 413,
       body: { error: 'Payload Too Large' },
     });
+  });
+
+  it('runs AuthGuard before validation and the controller handler', async () => {
+    let handlerCalled = false;
+
+    @Controller('/protected')
+    class ProtectedController {
+      @Post()
+      create(@Body() _body: CreateUserDto) {
+        handlerCalled = true;
+        return { ok: true };
+      }
+    }
+
+    const response = await call(
+      new Dispatcher([ProtectedController]),
+      '/protected',
+      'POST',
+      { name: '', email: 'not-an-email' },
+      false,
+    );
+
+    expect(response).toEqual({
+      status: 403,
+      body: { error: 'Forbidden' },
+    });
+    expect(handlerCalled).toBe(false);
+  });
+
+  it('makes request-id available deep in the async stack and returns it', async () => {
+    @Injectable()
+    class RequestAwareService {
+      async getRequestId() {
+        await Promise.resolve();
+        return requestContext.getRequestId();
+      }
+    }
+
+    @Controller('/context')
+    class ContextController {
+      constructor(private readonly service: RequestAwareService) {}
+
+      @Get()
+      async read() {
+        return { requestId: await this.service.getRequestId() };
+      }
+    }
+
+    const incoming = Readable.from([]);
+    Object.assign(incoming, {
+      method: 'GET',
+      url: '/context',
+      headers: {
+        authorization: 'Bearer test-token',
+        'x-request-id': 'request-from-client',
+      },
+    });
+    const headers = new Map<string, string>();
+    let responseBody = '';
+    const outgoing = {
+      statusCode: 200,
+      setHeader(name: string, value: string) {
+        headers.set(name.toLowerCase(), value);
+      },
+      end(chunk?: string) {
+        responseBody = chunk ?? '';
+      },
+    };
+
+    await new Dispatcher([ContextController]).handle(
+      incoming as IncomingMessage,
+      outgoing as unknown as ServerResponse,
+    );
+
+    expect(JSON.parse(responseBody)).toEqual({
+      requestId: 'request-from-client',
+    });
+    expect(headers.get('x-request-id')).toBe('request-from-client');
+  });
+
+  it('runs the request lifecycle in the required order', async () => {
+    const stages: string[] = [];
+
+    @Controller('/order')
+    class OrderController {
+      @Post()
+      create(@Body() _dto: CreateUserDto) {
+        return { ok: true };
+      }
+    }
+
+    const dispatcher = new Dispatcher(
+      [OrderController],
+      new Container(),
+      (stage) => stages.push(stage),
+    );
+
+    expect(
+      await call(dispatcher, '/order', 'POST', {
+        name: 'Ada',
+        email: 'ada@example.com',
+      }),
+    ).toEqual({ status: 200, body: { ok: true } });
+    expect(stages).toEqual([
+      'middleware',
+      'guard',
+      'interceptor:before',
+      'pipe',
+      'handler',
+      'interceptor:after',
+    ]);
   });
 });

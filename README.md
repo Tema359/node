@@ -44,6 +44,53 @@ When a class has a decorator, TypeScript can emit its constructor parameter type
 
 TypeScript passes a `parameterIndex` to every parameter decorator. This index identifies the argument's position in the method signature. For example, in `find(@Param('id') id, @Query('view') view)`, the decorators receive the indexes `0` and `1`. `@Param`, `@Query`, and `@Body` do not read the HTTP request themselves. Instead, they store the argument index, value source, and optional name in the method's metadata. When handling a request, the dispatcher reads this metadata, creates an `args` array, assigns each extracted value to `args[parameterIndex]`, and invokes the controller method with `handler.apply(controller, args)`. This is how each value reaches the parameter carrying the corresponding decorator.
 
+## Request lifecycle
+
+```text
+Incoming HTTP request
+        |
+        v
+Middleware: create/read X-Request-Id and enter AsyncLocalStorage
+        |
+        v
+Router: find a route from decorator metadata
+        |
+        v
+Guard: check Authorization --------------------------> 403 Forbidden
+        |
+        v
+Parse the JSON body
+        |
+        v
+Interceptor: before
+        |
+        v
+Pipe: validate and transform the argument with Zod --> 400 Validation Error
+        |
+        v
+Controller handler
+        |
+        v
+Interceptor: after (also runs when the handler throws)
+        |
+        v
+Serialize the result to JSON
+        |
+        v
+HTTP response with X-Request-Id
+
+Any thrown error ------------------------------------> Exception Filter
+                                                        | 404 Not Found
+                                                        | 400 Validation Error
+                                                        ` 500 Internal Server Error
+```
+
+The six observable lifecycle stages are tested in this exact order: `middleware`, `guard`, `interceptor:before`, `pipe`, `handler`, and `interceptor:after`.
+
+## Why AsyncLocalStorage is used instead of a global variable
+
+A Node.js process handles many requests concurrently. If the current request ID were stored in a global variable, a second request could overwrite it while the first request was awaiting a database call, causing logs and responses to receive the wrong ID. `AsyncLocalStorage` creates an isolated store for each asynchronous execution chain and preserves it across promises, timers, services, and repository calls. Deeply nested code can therefore read the correct request ID without passing it through every function signature, while concurrent requests remain isolated from one another.
+
 ## Certificate generation command
 
 ```bash

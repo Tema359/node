@@ -1,11 +1,16 @@
-import { IsEmail, IsString, MinLength } from '../pipes/validation.pipe.js';
+import { z } from 'zod';
 
 export class CreateUserDto {
-  @IsString()
-  @MinLength(2)
+  static readonly schema = z.object({
+    name: z
+      .string({ error: 'must be a string' })
+      .min(2, { error: 'must be at least 2 characters long' }),
+    email: z
+      .string({ error: 'must be a string' })
+      .email({ error: 'must be a valid email' }),
+  });
+
   name!: string;
 
-  @IsString()
-  @IsEmail()
   email!: string;
 }
